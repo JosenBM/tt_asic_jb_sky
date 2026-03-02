@@ -61,7 +61,8 @@ module asic_top #(
 );
 
     // ---------------- Register file storage (RW registers) ----------------
-    reg [7:0] regs [0:255];
+    // EDIT: shrink regfile for area/routing. You use <= 0x6D, so 0x00..0x7F is safe.
+    reg [7:0] regs [0:127];
 
     // ---------------- I2C interface wires ----------------
     wire [7:0] i2c_reg_addr;
@@ -308,7 +309,8 @@ module asic_top #(
     integer k;
     always @(posedge ref_clk or negedge rst_n) begin
         if (!rst_n) begin
-            for (k=0; k<256; k=k+1) regs[k] <= 8'h00;
+            // EDIT: loop bound matches new regfile size
+            for (k=0; k<128; k=k+1) regs[k] <= 8'h00;
 
             regs[8'h00] <= 8'hC3; // DEVICE_ID
             regs[8'h04] <= 8'h00; // GLOBAL_CTRL
@@ -388,9 +390,12 @@ module asic_top #(
                     end
                 end
 
+                // EDIT: prevent out-of-range reg indexing (<=0x7F only)
                 // Prevent I2C from overriding ADC temp regs when ADC enabled
                 if (!(global_en && (i2c_addr_d == 8'h34 || i2c_addr_d == 8'h35))) begin
-                    regs[i2c_addr_d] <= i2c_data_d;
+                    if (i2c_addr_d <= 8'h7F) begin
+                        regs[i2c_addr_d] <= i2c_data_d;
+                    end
                 end
 
                 // DAC commit request
@@ -517,7 +522,8 @@ module asic_top #(
             8'h6C: i2c_rd_data = snap_temp[7:0];
             8'h6D: i2c_rd_data = snap_temp[15:8];
 
-            default: i2c_rd_data = regs[i2c_reg_addr];
+            // EDIT: default reg read is guarded
+            default: i2c_rd_data = (i2c_reg_addr <= 8'h7F) ? regs[i2c_reg_addr] : 8'h00;
         endcase
     end
 
