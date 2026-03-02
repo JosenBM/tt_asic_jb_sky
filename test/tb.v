@@ -4,9 +4,11 @@
 
 module tb;
 
-    // ---------------- TT harness signals ----------------
-    reg  [7:0] ui_in  = 8'h00;
-    reg  [7:0] uio_in = 8'h00;
+    // ============================================================
+    // TT Interface Signals
+    // ============================================================
+    wire [7:0] ui_in;
+    wire [7:0] uio_in;
     wire [7:0] uo_out;
     wire [7:0] uio_out;
     wire [7:0] uio_oe;
@@ -15,85 +17,38 @@ module tb;
     reg clk   = 1'b0;
     reg rst_n = 1'b0;
 
-    // 50 MHz clock: 20ns = 20000ps, half=10000ps
+    // 50 MHz clock: period 20ns = 20000ps, half=10000ps
     always #10000 clk = ~clk;
 
-    // ---------------- Pass/fail flags for cocotb ----------------
+    // ============================================================
+    // PASS / FAIL flags (checked by cocotb)
+    // ============================================================
     reg tb_done = 1'b0;
     reg tb_fail = 1'b0;
 
-    // ---------------- I2C bus (open-drain) ----------------
-    reg scl_drv = 1'b1;   // master drives SCL
-    reg sda_drv = 1'b1;   // 0=pull low, 1=release
+    // ============================================================
+    // I2C Open Drain Modeling
+    //   Mapping assumed:
+    //     ui[0]  = SCL
+    //     uio[0] = SDA (open-drain)
+    // ============================================================
+    reg scl_drv = 1'b1;
+    reg sda_drv = 1'b1; // 0 = pull low, 1 = release
 
-    // Pin mapping (must match your wrapper + info.yaml)
-    // ui[0]  = I2C_SCL
-    // uio[0] = I2C_SDA (open drain)
-    wire dut_pulls_sda_low = (uio_oe[0] == 1'b1) && (uio_out[0] == 1'b0);
-    wire master_pulls_sda_low = (sda_drv == 1'b0);
-    wire sda_line = ~(dut_pulls_sda_low | master_pulls_sda_low); // pull-up default
+    // DUT pulls SDA low when output-enable and output=0
+    wire dut_sda_low = (uio_oe[0] && (uio_out[0] == 1'b0));
 
-    // Drive SCL onto ui[0]
-    always @(*) ui_in[0] = scl_drv;
+    // Resolved SDA line (pull-up by default)
+    wire sda_line = ~(dut_sda_low | (sda_drv == 1'b0));
 
-    // Feed resolved SDA to uio_in[0]
-    always @(*) uio_in[0] = sda_line;
+    // ============================================================
+    // Oscillators (9)
+    // ============================================================
+    reg osc0=0, osc1=0, osc2=0, osc3=0, osc4=0;
+    reg osc5=0, osc6=0, osc7=0, osc8=0;
 
-    // ---------------- Oscillators (9) ----------------
-    reg osc0=0, osc1=0, osc2=0, osc3=0, osc4=0, osc5=0, osc6=0, osc7=0, osc8=0;
-
-    // Map osc inputs per wrapper:
-    // ui[3..7] = osc0..osc4
-    // uio[1..4] = osc5..osc8
-    always @(*) begin
-        ui_in[3] = osc0;
-        ui_in[4] = osc1;
-        ui_in[5] = osc2;
-        ui_in[6] = osc3;
-        ui_in[7] = osc4;
-
-        uio_in[1] = osc5;
-        uio_in[2] = osc6;
-        uio_in[3] = osc7;
-        uio_in[4] = osc8;
-
-        // unused inputs
-        uio_in[7:5] = 3'b000;
-    end
-
-    // ---------------- SPI mapping ----------------
-    // Outputs:
-    wire spi_sclk = uo_out[0];
-    wire spi_mosi = uo_out[1];
-    wire spi_cs_n = uo_out[2];
-
-    wire adc_sclk = uo_out[3];
-    wire adc_cs_n = uo_out[4];
-
-    // Inputs (MISO):
-    wire spi_miso = 1'b0; // tie low
-    wire adc_miso;
-
-    always @(*) begin
-        ui_in[1] = spi_miso; // SPI_DAC_MISO
-        ui_in[2] = adc_miso; // SPI_ADC_MISO
-    end
-
-    // ---------------- DUT ----------------
-    tt_um_josenbm dut (
-        .ui_in  (ui_in),
-        .uo_out (uo_out),
-        .uio_in (uio_in),
-        .uio_out(uio_out),
-        .uio_oe (uio_oe),
-        .ena    (ena),
-        .clk    (clk),
-        .rst_n  (rst_n)
-    );
-
-    // ---------------- Oscillator stimulus ----------------
-    // ~11MHz-ish, different by small offsets
-    localparam integer HP0_PS = 45455;
+    // Base around 11MHz with slight offsets
+    localparam integer HP0_PS = 45455; // ~11.000 MHz half-period
     localparam integer HP1_PS = 45450;
     localparam integer HP2_PS = 45445;
     localparam integer HP3_PS = 45440;
@@ -113,8 +68,77 @@ module tb;
     initial forever #(HP7_PS) osc7 = ~osc7;
     initial forever #(HP8_PS) osc8 = ~osc8;
 
-    // ---------------- I2C bit-bang helpers ----------------
-    task i2c_t; begin #200000; end endtask // 200ns
+    // ============================================================
+    // SPI Signals (from uo_out) + MISOs (into ui_in)
+    //   Mapping assumed (matches your info.yaml earlier):
+    //     uo[0]=SPI_DAC_SCLK, uo[1]=SPI_DAC_MOSI, uo[2]=SPI_DAC_CS_N
+    //     uo[3]=SPI_ADC_SCLK, uo[4]=SPI_ADC_CS_N
+    //     ui[1]=SPI_DAC_MISO, ui[2]=SPI_ADC_MISO
+    // ============================================================
+    wire spi_sclk = uo_out[0];
+    wire spi_mosi = uo_out[1];
+    wire spi_cs_n = uo_out[2];
+
+    wire adc_sclk = uo_out[3];
+    wire adc_cs_n = uo_out[4];
+
+    wire spi_miso = 1'b0; // tie low
+    wire adc_miso;
+
+    // ============================================================
+    // Single-driver input bus (CRITICAL CI FIX)
+    // ============================================================
+    reg [7:0] ui_bus;
+    reg [7:0] uio_bus;
+
+    assign ui_in  = ui_bus;
+    assign uio_in = uio_bus;
+
+    always @(*) begin
+        ui_bus  = 8'h00;
+        uio_bus = 8'h00;
+
+        // I2C
+        ui_bus[0]  = scl_drv;
+        uio_bus[0] = sda_line;
+
+        // SPI MISOs into DUT
+        ui_bus[1] = spi_miso;
+        ui_bus[2] = adc_miso;
+
+        // Osc inputs (as mapped in wrapper)
+        ui_bus[3] = osc0;
+        ui_bus[4] = osc1;
+        ui_bus[5] = osc2;
+        ui_bus[6] = osc3;
+        ui_bus[7] = osc4;
+
+        uio_bus[1] = osc5;
+        uio_bus[2] = osc6;
+        uio_bus[3] = osc7;
+        uio_bus[4] = osc8;
+
+        // uio_bus[7:5] remain 0
+    end
+
+    // ============================================================
+    // DUT
+    // ============================================================
+    tt_um_josenbm dut (
+        .ui_in  (ui_in),
+        .uo_out (uo_out),
+        .uio_in (uio_in),
+        .uio_out(uio_out),
+        .uio_oe (uio_oe),
+        .ena    (ena),
+        .clk    (clk),
+        .rst_n  (rst_n)
+    );
+
+    // ============================================================
+    // I2C bit-bang helpers (Icarus-friendly)
+    // ============================================================
+    task i2c_t; begin #200000; end endtask // 200ns = 200000ps
 
     task i2c_scl_lo; begin scl_drv = 1'b0; i2c_t(); end endtask
     task i2c_scl_hi; begin scl_drv = 1'b1; i2c_t(); end endtask
@@ -124,14 +148,17 @@ module tb;
 
     task i2c_start;
     begin
-        i2c_sda_rel(); i2c_scl_hi();
-        i2c_sda_lo();  i2c_scl_lo();
+        i2c_sda_rel();
+        i2c_scl_hi();
+        i2c_sda_lo();
+        i2c_scl_lo();
     end
     endtask
 
     task i2c_stop;
     begin
-        i2c_sda_lo(); i2c_scl_hi();
+        i2c_sda_lo();
+        i2c_scl_hi();
         i2c_sda_rel();
     end
     endtask
@@ -156,23 +183,26 @@ module tb;
     endtask
 
     task i2c_write_byte(input [7:0] data_byte, output ok);
-        integer i; reg ack;
+        integer i;
+        reg ack;
     begin
-        for (i=7; i>=0; i=i-1) i2c_write_bit(data_byte[i]);
+        for (i = 7; i >= 0; i = i - 1)
+            i2c_write_bit(data_byte[i]);
         i2c_read_bit(ack);
         ok = (ack == 1'b0);
     end
     endtask
 
     task i2c_read_byte(input ack_more, output [7:0] v);
-        integer i; reg b;
+        integer i;
+        reg b;
     begin
         v = 8'h00;
-        for (i=7; i>=0; i=i-1) begin
+        for (i = 7; i >= 0; i = i - 1) begin
             i2c_read_bit(b);
             v[i] = b;
         end
-        i2c_write_bit(ack_more ? 1'b0 : 1'b1);
+        i2c_write_bit(ack_more ? 1'b0 : 1'b1); // ACK=0 continue, NACK=1 end
     end
     endtask
 
@@ -180,42 +210,57 @@ module tb;
         reg ok;
     begin
         i2c_start();
-        i2c_write_byte({addr,1'b0}, ok); if(!ok) begin $display("NO ACK addr(W)"); tb_fail=1; $finish; end
-        i2c_write_byte(regaddr, ok);     if(!ok) begin $display("NO ACK reg");     tb_fail=1; $finish; end
-        i2c_write_byte(data, ok);        if(!ok) begin $display("NO ACK data");    tb_fail=1; $finish; end
+        i2c_write_byte({addr,1'b0}, ok);
+        if (!ok) begin $display("FATAL: No ACK on address(W)"); tb_fail=1; tb_done=1; $finish; end
+
+        i2c_write_byte(regaddr, ok);
+        if (!ok) begin $display("FATAL: No ACK on regaddr"); tb_fail=1; tb_done=1; $finish; end
+
+        i2c_write_byte(data, ok);
+        if (!ok) begin $display("FATAL: No ACK on data"); tb_fail=1; tb_done=1; $finish; end
+
         i2c_stop();
     end
     endtask
 
     task i2c_write_reg32(input [6:0] addr, input [7:0] base_reg, input [31:0] value);
     begin
-        i2c_write_reg8(addr, base_reg+8'd0, value[7:0]);
-        i2c_write_reg8(addr, base_reg+8'd1, value[15:8]);
-        i2c_write_reg8(addr, base_reg+8'd2, value[23:16]);
-        i2c_write_reg8(addr, base_reg+8'd3, value[31:24]);
+        i2c_write_reg8(addr, base_reg + 8'd0, value[7:0]);
+        i2c_write_reg8(addr, base_reg + 8'd1, value[15:8]);
+        i2c_write_reg8(addr, base_reg + 8'd2, value[23:16]);
+        i2c_write_reg8(addr, base_reg + 8'd3, value[31:24]);
     end
     endtask
 
+    // Read N bytes starting at regaddr into rb[]
     reg [7:0] rb [0:63];
     task i2c_read_regs(input [6:0] addr, input [7:0] regaddr, input integer n);
-        integer i; reg ok; reg [7:0] tmp;
+        integer i;
+        reg ok;
+        reg [7:0] tmp;
     begin
         i2c_start();
-        i2c_write_byte({addr,1'b0}, ok); if(!ok) begin $display("NO ACK addr(W)"); tb_fail=1; $finish; end
-        i2c_write_byte(regaddr, ok);     if(!ok) begin $display("NO ACK reg");     tb_fail=1; $finish; end
+        i2c_write_byte({addr,1'b0}, ok);
+        if (!ok) begin $display("FATAL: No ACK on address(W)"); tb_fail=1; tb_done=1; $finish; end
+
+        i2c_write_byte(regaddr, ok);
+        if (!ok) begin $display("FATAL: No ACK on regaddr"); tb_fail=1; tb_done=1; $finish; end
 
         i2c_start();
-        i2c_write_byte({addr,1'b1}, ok); if(!ok) begin $display("NO ACK addr(R)"); tb_fail=1; $finish; end
+        i2c_write_byte({addr,1'b1}, ok);
+        if (!ok) begin $display("FATAL: No ACK on address(R)"); tb_fail=1; tb_done=1; $finish; end
 
-        for (i=0; i<n; i=i+1) begin
-            i2c_read_byte(i!=(n-1), tmp);
+        for (i = 0; i < n; i = i + 1) begin
+            i2c_read_byte(i != (n-1), tmp);
             rb[i] = tmp;
         end
         i2c_stop();
     end
     endtask
 
-    // ---------------- DAC SPI monitor ----------------
+    // ============================================================
+    // DAC SPI monitor
+    // ============================================================
     reg [23:0] spi_cap;
     integer    spi_bits;
 
@@ -240,7 +285,9 @@ module tb;
         end
     end
 
-    // ---------------- ADC model (ADS7042-style shift) ----------------
+    // ============================================================
+    // ADC model (ADS7042-style shift)
+    // ============================================================
     reg [11:0] adc_code_model = 12'h123;
     reg [15:0] adc_shift;
     integer    adc_bit;
@@ -250,7 +297,7 @@ module tb;
     always begin
         #5000000000; // 5ms
         adc_code_model = adc_code_model + 12'h031;
-        $display("ADC(model) new code = 0x%03h (t=%0t)", adc_code_model, $time);
+        $display("ADC(model) new code=0x%03h (t=%0t)", adc_code_model, $time);
     end
 
     always @(negedge adc_cs_n) begin
@@ -268,22 +315,28 @@ module tb;
         end
     end
 
-    // ---------------- Test sequence (your proven flow) ----------------
+    // ============================================================
+    // Test sequence
+    // ============================================================
     localparam [6:0] I2C7 = 7'h2A;
 
     localparam [15:0] CODE_0P9V = 16'hB851;
-    localparam [7:0]  REG_GATE0 = 8'h20;
-    localparam [7:0]  REG_APPLY = 8'h27;
+
+    localparam [7:0] REG_GATE0  = 8'h20;
+    localparam [7:0] REG_APPLY  = 8'h27;
 
     localparam integer REF_CLK_HZ = 50_000_000;
-    integer GATE_SEL = 0; // 0=1ms,1=10ms,2=100ms,3=1s
+
+    // CI-safe default. Use 0 or 1. (3 = 1s may be too slow for CI)
+    integer GATE_SEL = 0;
+
     integer gate_cycles_cfg;
     time    wait_time_ps;
 
     task set_gate_profile(input integer sel);
         integer gate_ms;
     begin
-        case(sel)
+        case (sel)
             0: gate_ms = 1;
             1: gate_ms = 10;
             2: gate_ms = 100;
@@ -291,53 +344,66 @@ module tb;
             default: gate_ms = 1;
         endcase
 
-        gate_cycles_cfg = (REF_CLK_HZ/1000)*gate_ms;
+        gate_cycles_cfg = (REF_CLK_HZ / 1000) * gate_ms; // cycles for gate
 
+        // wait = 3x gate (ms->ps)
         wait_time_ps = gate_ms;
         wait_time_ps = wait_time_ps * 3;
-        wait_time_ps = wait_time_ps * 1000000000; // ms->ps
-        $display("Gate sel=%0d gate_ms=%0d gate_cycles=%0d wait=%0t ps", sel, gate_ms, gate_cycles_cfg, wait_time_ps);
+        wait_time_ps = wait_time_ps * 1000000000;
+
+        $display("TB gate profile: sel=%0d gate_ms=%0d gate_cycles=%0d wait=%0t ps",
+                 sel, gate_ms, gate_cycles_cfg, wait_time_ps);
     end
     endtask
 
     initial begin
+        reg ok;
         integer i;
+
         integer c[0:8];
         integer temp;
 
         $dumpfile("tb.fst");
         $dumpvars(0, tb);
 
-        // init
+        $display("TB start");
+
+        // idle I2C lines
         scl_drv = 1'b1;
         sda_drv = 1'b1;
-        ena     = 1'b1;
 
+        // reset
         rst_n = 1'b0;
-        #1000; // 1ns in ps-timescale
+        #1000000;   // 1us
         rst_n = 1'b1;
+        #2000000;   // 2us settle
 
         // Address ACK check
-        begin
-            reg ok;
-            i2c_start();
-            i2c_write_byte({I2C7,1'b0}, ok);
-            $display("ADDR ACK? ok=%b (expect 1)", ok);
-            if (!ok) begin tb_fail=1; $display("FAIL: no ACK"); $finish; end
-            i2c_stop();
+        i2c_start();
+        i2c_write_byte({I2C7,1'b0}, ok);
+        $display("ADDR ACK? ok=%b (expect 1)", ok);
+        i2c_stop();
+
+        if (!ok) begin
+            tb_fail = 1'b1;
+            $display("FAIL: no ACK");
+            tb_done = 1'b1;
+            #100000;
+            $finish;
         end
 
-        // Enable global + counters
+        // Enable global + counters (also enables ADC sampling)
+        // REG04: bit0=global_en, bit4=cnt_en
         i2c_write_reg8(I2C7, 8'h04, 8'h11);
 
-        // Program DAC codes CH0/CH1 and commit (exercise SPI)
+        // Program DAC codes CH0/CH1 then commit
         i2c_write_reg8(I2C7, 8'h12, CODE_0P9V[7:0]);
         i2c_write_reg8(I2C7, 8'h13, CODE_0P9V[15:8]);
         i2c_write_reg8(I2C7, 8'h14, CODE_0P9V[7:0]);
         i2c_write_reg8(I2C7, 8'h15, CODE_0P9V[15:8]);
         i2c_write_reg8(I2C7, 8'h26, 8'h02); // commit
 
-        // Gate profile
+        // Program gate based on selector
         set_gate_profile(GATE_SEL);
 
         // Disable counters, program gate cycles, apply, re-enable
@@ -346,14 +412,14 @@ module tb;
         i2c_write_reg8(I2C7, REG_APPLY, 8'h01);
         i2c_write_reg8(I2C7, 8'h04, 8'h11); // global_en=1, cnt_en=1
 
-        // Wait for results
+        // Wait for ADC + counters
         #(wait_time_ps);
 
-        // Read stream (38 bytes from 0x48)
+        // Read full stream: 9 channels * 4 bytes + 2 temp bytes = 38 bytes
         i2c_read_regs(I2C7, 8'h48, 38);
 
-        // Decode counts
-        for (i=0; i<9; i=i+1) begin
+        // Decode counts (little-endian u32)
+        for (i = 0; i < 9; i = i + 1) begin
             c[i] = (rb[i*4 + 0]) |
                    (rb[i*4 + 1] << 8) |
                    (rb[i*4 + 2] << 16) |
@@ -362,21 +428,20 @@ module tb;
 
         temp = rb[36] | (rb[37] << 8);
 
-        $display("STREAM gate_cycles=%0d", gate_cycles_cfg);
-        for (i=0; i<9; i=i+1) begin
+        $display("STREAM (gate_cycles=%0d):", gate_cycles_cfg);
+        for (i = 0; i < 9; i = i + 1) begin
+            $display("  CH%0d count = %0d", i, c[i]);
             if (c[i] <= 0) begin
-                $display("FAIL: CH%0d count not >0 : %0d", i, c[i]);
-                tb_fail = 1;
+                $display("FAIL: CH%0d count not > 0", i);
+                tb_fail = 1'b1;
             end
-            $display("  CH%0d count=%0d", i, c[i]);
         end
-        $display("  TEMP raw=0x%04h", temp[15:0]);
+        $display("  TEMP (raw 16b) = 0x%04h", temp[15:0]);
 
-        if (tb_fail) begin
+        if (tb_fail)
             $display("TB FAIL");
-        end else begin
+        else
             $display("TB PASS");
-        end
 
         tb_done = 1'b1;
         #1000000;
