@@ -8,7 +8,7 @@ project:
   clock_hz:     50000000
 
   # Start with 1x1. CI will fail if it doesn't fit.
-  tiles: "3x2"  # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
+  tiles: "6x2"  # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
 
   # Must match your wrapper module name exactly
   top_module:  "tt_um_josenbm"
