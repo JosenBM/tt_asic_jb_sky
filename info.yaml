@@ -1,6 +1,6 @@
 # Tiny Tapeout project information
 project:
-  title:        "9-Channel Frequency Counter with I2C + SPI"
+  title:        "9-Channel Frequency Counter with I2C + SPI DAC & ADC"
   author:       "Jose Bahamonde"
   discord:      ""   # optional
   description:  "Programmable 9-channel frequency counter with I2C control, SPI DAC output, and SPI ADC sampling."
