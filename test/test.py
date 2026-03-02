@@ -1,19 +1,15 @@
 import cocotb
-from cocotb.triggers import Timer, RisingEdge
+from cocotb.triggers import RisingEdge, Timer, First
 
 @cocotb.test()
 async def verilog_selftest(dut):
-    # Wait until tb_done goes high, with a timeout
-    timeout_ns = 50_000_000  # 50 ms sim timeout (adjust if using long gate)
-    waited = 0
+    # Wait for tb_done, but time out if it never happens
+    done = RisingEdge(dut.tb_done)
+    timeout = Timer(20, unit="ms")  # plenty for CI
 
-    # Poll tb_done every 100 us
-    while int(dut.tb_done.value) == 0:
-        await Timer(100_000, units="ns")
-        waited += 100_000
-        if waited >= timeout_ns:
-            raise cocotb.result.TestFailure("Timeout waiting for tb_done")
+    trig = await First(done, timeout)
+    if trig is timeout:
+        raise cocotb.result.TestFailure("Timeout waiting for tb_done")
 
-    # Check tb_fail
     if int(dut.tb_fail.value) != 0:
         raise cocotb.result.TestFailure("Verilog self-test reported FAIL")
