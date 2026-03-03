@@ -11,11 +11,11 @@ project:
   tiles: "8x2"  # Valid values: 1x1, 1x2, 2x2, 3x2, 4x2, 6x2 or 8x2
 
   # Must match your wrapper module name exactly
-  top_module:  "tt_um_josenbm"
+  top_module:  "tt_um_josenbmc"
 
   # List ALL source files in ./src
   source_files:
-    - "tt_um_josenbm.v"
+    - "tt_um_josenbmc.v"
     - "asic_top.v"
     - "i2c_slave.v"
     - "freq_counter_gate.v"
